@@ -1,0 +1,179 @@
+<!DOCTYPE html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Prototyp – autoryzacja Bot ↔ Użytkownik</title>
+<style>
+:root{--bg:#f4f6f8;--c:#fff;--t:#1b1f24;--m:#64707d;--b:#d6dce2;--ok:#127a3d;--er:#b3261e;--wn:#9a6700;--ac:#2456d6}
+@media(prefers-color-scheme:dark){:root{--bg:#14171a;--c:#1d2125;--t:#e6e9ec;--m:#98a2ad;--b:#333a41;--ok:#4cc27f;--er:#ff7b72;--wn:#e3b341;--ac:#7aa2ff}}
+*{box-sizing:border-box}body{margin:0;padding:14px;font:14px system-ui,sans-serif;background:var(--bg);color:var(--t)}
+h1{font-size:19px;margin:0}h2{font-size:14px;margin:0 0 8px}p{margin:4px 0;color:var(--m);font-size:12px}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:12px;margin-top:12px}
+.c{background:var(--c);border:1px solid var(--b);border-radius:8px;padding:12px}
+button{background:var(--ac);color:#fff;border:0;border-radius:6px;padding:6px 10px;margin:2px 2px 2px 0;cursor:pointer;font-size:13px}
+button.x{background:transparent;color:var(--er);border:1px solid var(--er)}button.k{background:var(--er)}
+input,select{background:var(--bg);color:var(--t);border:1px solid var(--b);border-radius:6px;padding:5px;margin:2px 4px 2px 0;width:auto;max-width:130px}
+pre{white-space:pre-wrap;word-break:break-all;background:var(--bg);border-radius:6px;padding:6px;margin:6px 0;font-size:12px;overflow-x:auto}
+#log{max-height:280px;overflow:auto;font:12px ui-monospace,monospace}#log div{padding:2px 0;border-bottom:1px solid var(--b)}
+.ok{color:var(--ok)}.er{color:var(--er)}.wn{color:var(--wn)}.big{font:700 20px ui-monospace,monospace;letter-spacing:2px}
+label{font-size:12px;margin-right:8px;white-space:nowrap}
+</style></head><body>
+<h1>Autoryzacja Bot ↔ Użytkownik – prototyp</h1>
+<p>Wszystko działa lokalnie w przeglądarce (WebCrypto). Serwer, brama, giełda i bot są symulowane w jednym pliku. Zielone wpisy w dzienniku = akcja przyjęta, czerwone = obrona zadziałała.</p>
+<div><button onclick="skip()">⏩ Przewiń zegar +11 min</button><button class="x" onclick="location.reload()">Reset prototypu</button></div>
+<div class="g">
+
+<div class="c"><h2>1. Użytkownik: hasło + 2FA + tokeny (rozdz. 2)</h2>
+<input id="pw" type="text" value="Test#2026pass" title="hasło demo"><input id="otp" placeholder="kod TOTP" size="8">
+<p>Telefon (aplikacja TOTP, kod co 30 s):</p><div class="big" id="ph">…</div>
+<button onclick="login()">Zaloguj</button><button onclick="refresh()">Odśwież token (rotacja)</button><button onclick="logout()">Wyloguj wszędzie</button>
+<button class="x" onclick="refresh(U.oldRt)">Atak: użyj starego refresh tokena</button>
+<pre id="us"></pre></div>
+
+<div class="c"><h2>2. Delegacja uprawnień bota – RBAC / Scopes (rozdz. 3.1–3.2)</h2>
+<label><input type="checkbox" class="sc" value="read:market_data" checked>read:market_data</label>
+<label><input type="checkbox" class="sc" value="trade:execute_orders" checked>trade:execute_orders</label>
+<label><input type="checkbox" class="sc" value="trade:cancel_orders" checked>trade:cancel_orders</label>
+<label><input type="checkbox" disabled>funds:withdraw (zablokowane na stałe)</label><br>
+<button onclick="startBot()">Wygeneruj i uruchom bota</button><button onclick="renew()">Odnów token bota (podpis HMAC)</button>
+<button onclick="revokeBot()">Cofnij botowi dostęp</button><button class="k" onclick="kill()">🛑 KILL SWITCH</button>
+<pre id="bs"></pre></div>
+
+<div class="c"><h2>3. Bot: zlecenia podpisane HMAC-SHA256 (rozdz. 3.2)</h2>
+<select id="sd"><option>buy</option><option>sell</option></select><input id="qt" value="0.02" size="5" title="ilość BTC"><input id="pr" value="60000" size="7" title="cena"><button onclick="$('pr').value=EX.px.toFixed(0)">= rynek</button><br>
+<button onclick="order()">Złóż zlecenie</button><button onclick="cancelAll()">Anuluj moje zlecenia</button>
+<p>Ataki z tabeli zagrożeń:</p>
+<button class="x" onclick="replay()">Replay: powtórz pakiet</button><button class="x" onclick="tamper()">MITM: zmień cenę</button>
+<button class="x" onclick="order('old')">Pakiet sprzed 30 s</button><button class="x" onclick="withdraw()">Wypłata środków</button><button class="x" onclick="chpass()">Zmiana hasła konta</button></div>
+
+<div class="c"><h2>4. Giełda i bezpieczniki – Safety Rails (rozdz. 4.2)</h2>
+<label>Max pozycja % <input id="lp" value="25" size="3" oninput="setLim()"></label>
+<label>Max dzienna strata % <input id="ld" value="3" size="3" oninput="setLim()"></label>
+<label>Poślizg % <input id="ls" value="0.5" size="3" oninput="setLim()"></label><br>
+<button class="x" onclick="crash()">Krach rynku −20%</button><pre id="ex"></pre></div>
+
+<div class="c"><h2>5. Kanał real-time: bilet jednorazowy + heartbeat (rozdz. 4.1)</h2>
+<button onclick="getTicket()">1. Pobierz bilet (8 s)</button><button onclick="connect()">2. Połącz biletem</button>
+<p>Kliknij „Połącz” drugi raz: ten sam bilet zostanie odrzucony. Heartbeat co 5 s (w projekcie: kilkanaście sekund).</p><pre id="ch"></pre></div>
+
+<div class="c"><h2>6. Brama, sieć i kradzież danych (rozdz. 1.2, 3.3)</h2>
+<button onclick="mtls('sha256:gw-01')">mTLS: certyfikat bramy</button><button class="x" onclick="mtls('sha256:obcy-99')">mTLS: obcy certyfikat</button>
+<button class="x" onclick="flood()">Rate limit: 15 zapytań naraz</button><button class="x" onclick="dump()">Kradzież bazy danych</button>
+<pre id="dump">TLS 1.3 + Certificate Pinning: szyfrowanie transportu jest tu zakładane, przeglądarka robi to za nas.</pre></div>
+
+</div>
+<div class="c" style="margin-top:12px"><h2>Dziennik zdarzeń (brama / serwer / bot)</h2><div id="log"></div></div>
+<p>Uwagi: Argon2id nie jest dostępny w WebCrypto, więc hasło chroni PBKDF2-SHA256 (w produkcji: Argon2id). RS256 jest użyte do JWT. Sekret HMAC bota jest trzymany po stronie serwera w szyfrowaniu kopertowym, bo weryfikacja HMAC wymaga samego sekretu (sam skrót nie wystarcza).</p>
+
+<script>
+const $=id=>document.getElementById(id),E=new TextEncoder(),D=new TextDecoder(),S=crypto.subtle;
+let off=0;const now=()=>Date.now()+off;
+const hex=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
+const unhex=h=>new Uint8Array(h.match(/../g).map(x=>parseInt(x,16)));
+const b64u=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+const ub64u=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
+const rnd=n=>crypto.getRandomValues(new Uint8Array(n));
+const canon=b=>JSON.stringify(Object.keys(b).sort().map(k=>[k,b[k]]));
+function log(m,k){const d=document.createElement('div');d.className=k||'';d.textContent=new Date(now()).toLocaleTimeString()+'  '+m;$('log').prepend(d)}
+const go=f=>async(...a)=>{try{await f(...a)}catch(e){log('✖ '+(e&&e.message||e),'er')}ui()};
+
+let KEYS,KMS,U={},B={},CH=null,lastPkt=null;
+const DB={user:null,refresh:{},revoked:new Set(),nonces:new Set(),tickets:{},bot:null,exKey:null,killed:false,rl:[],lim:{pos:25,dd:3,slip:0.5}};
+const EX={usdt:10000,start:10000,btc:0,px:60000,open:[],susp:false};
+const equity=()=>EX.usdt+EX.btc*EX.px;
+
+/* ---- kryptografia ---- */
+async function hmac(key,msg,h='SHA-256'){const k=await S.importKey('raw',key,{name:'HMAC',hash:h},false,['sign']);return new Uint8Array(await S.sign('HMAC',k,typeof msg=='string'?E.encode(msg):msg))}
+async function sha(s){return hex(await S.digest('SHA-256',E.encode(s)))}
+async function pbk(pw,salt){const k=await S.importKey('raw',E.encode(pw),'PBKDF2',false,['deriveBits']);return hex(await S.deriveBits({name:'PBKDF2',hash:'SHA-256',salt,iterations:150000},k,256))}
+async function totp(sec,t=now()){let c=Math.floor(t/30000),b=new Uint8Array(8);for(let i=7;i>=0;i--){b[i]=c&255;c=Math.floor(c/256)}
+ const h=await hmac(sec,b,'SHA-1'),o=h[19]&15,n=(((h[o]&127)<<24)|(h[o+1]<<16)|(h[o+2]<<8)|h[o+3])%1e6;return String(n).padStart(6,'0')}
+async function seal(plain){const dek=await S.generateKey({name:'AES-GCM',length:256},true,['encrypt','decrypt']),iv=rnd(12),iv2=rnd(12);
+ const ct=await S.encrypt({name:'AES-GCM',iv},dek,E.encode(plain)),wk=await S.encrypt({name:'AES-GCM',iv:iv2},KMS,await S.exportKey('raw',dek));
+ return{iv:hex(iv),ct:hex(ct),iv2:hex(iv2),wk:hex(wk)}}
+async function unseal(r){const raw=await S.decrypt({name:'AES-GCM',iv:unhex(r.iv2)},KMS,unhex(r.wk)),dek=await S.importKey('raw',raw,'AES-GCM',false,['decrypt']);
+ return D.decode(await S.decrypt({name:'AES-GCM',iv:unhex(r.iv)},dek,unhex(r.ct)))}
+async function jwt(p){const h=b64u(E.encode('{"alg":"RS256","typ":"JWT"}')),b=b64u(E.encode(JSON.stringify(p)));
+ return h+'.'+b+'.'+b64u(await S.sign('RSASSA-PKCS1-v1_5',KEYS.privateKey,E.encode(h+'.'+b)))}
+async function vjwt(t){const[h,b,s]=t.split('.');if(!await S.verify('RSASSA-PKCS1-v1_5',KEYS.publicKey,ub64u(s),E.encode(h+'.'+b)))throw'zły podpis tokenu';
+ const c=JSON.parse(D.decode(ub64u(b)));if(c.exp*1000<now())throw'token wygasł';if(DB.revoked.has(c.sid))throw'sesja unieważniona';return c}
+
+/* ---- brama ---- */
+async function gate(tok,scope){DB.rl=DB.rl.filter(t=>now()-t<10000);DB.rl.push(now());if(DB.rl.length>12)throw'429 Brama: przekroczono limit zapytań';
+ const c=await vjwt(tok).catch(e=>{throw'401 '+e});
+ if(scope&&!(c.scope||[]).includes(scope))throw`403 brak uprawnienia ${scope} (zakresy: ${(c.scope||[]).join(', ')})`;return c}
+async function verifyPacket(b,sig){if(!DB.bot||DB.killed||DB.revoked.has(DB.bot.sid))throw'403 dostęp bota unieważniony';if(b.key!==DB.bot.key)throw'401 nieznany API_KEY';
+ const sec=await unseal(DB.bot.sealed);if(hex(await hmac(E.encode(sec),canon(b)))!==sig)throw'400 podpis HMAC niezgodny: dane zmienione po drodze';
+ if(Math.abs(now()-b.ts)>5000)throw'400 timestamp starszy niż 5 s: zlecenie odrzucone';
+ if(DB.nonces.has(b.nonce))throw'400 nonce już użyty: atak powtórzeniowy zablokowany';DB.nonces.add(b.nonce)}
+const mtls=go(async c=>{if(!['sha256:gw-01','sha256:auth-02','sha256:risk-03'].includes(c))throw'mTLS: certyfikat '+c+' spoza zaufanego CA, połączenie odrzucone';log('mTLS: certyfikat '+c+' zweryfikowany, polecenie przyjęte','ok')});
+const flood=go(async()=>{let n=0,e;for(let i=0;i<15;i++){try{await gate(B.token,'read:market_data');n++}catch(x){e=x}}log(`15 zapytań: ${n} przyjęto, reszta odrzucona (${e})`,'wn')});
+
+/* ---- użytkownik ---- */
+async function issue(fam){U.at=await jwt({sub:'dawid',sid:fam,role:'user',exp:Math.floor(now()/1000)+600});const rt=hex(rnd(24));DB.refresh[rt]={fam,used:false};U.oldRt=U.rt;U.rt=rt}
+const login=go(async()=>{const u=DB.user;if(await pbk($('pw').value,unhex(u.salt))!==u.pw)throw'Błędne hasło: skrót się nie zgadza';
+ const c=$('otp').value.trim();if(c!==await totp(u.totp)&&c!==await totp(u.totp,now()-30000))throw'Błędny kod 2FA (TOTP)';
+ U.fam=hex(rnd(8));await issue(U.fam);log('Zalogowano: Access Token RS256 (10 min) + Refresh Token (ciasteczko HttpOnly, Secure)','ok')});
+const refresh=go(async tok=>{tok=tok||U.rt;const r=DB.refresh[tok];if(!r)throw'Nieznany refresh token';if(DB.revoked.has(r.fam))throw'Sesja unieważniona, zaloguj się ponownie';
+ if(r.used){DB.revoked.add(r.fam);U.at=U.rt=null;throw'🚨 Użyto unieważnionego refresh tokena = kradzież. Sesja zablokowana, wylogowano wszystkie urządzenia'}
+ r.used=true;await issue(r.fam);log('Rotacja: stary refresh token unieważniony, wydano nowy komplet','ok')});
+const logout=go(async()=>{if(U.fam)DB.revoked.add(U.fam);U.at=U.rt=null;log('Wylogowano ze wszystkich urządzeń','wn')});
+const userOK=()=>vjwt(U.at).catch(e=>{throw'401 sesja użytkownika: '+e+' (zaloguj/odśwież)'});
+
+/* ---- bot ---- */
+async function botAuth(){const b={key:B.key,ts:now(),nonce:hex(rnd(8)),act:'token'};await verifyPacket(b,hex(await hmac(E.encode(B.secret),canon(b))));
+ B.token=await jwt({sub:'bot:'+DB.bot.key,sid:DB.bot.sid,scope:DB.bot.scopes,exp:Math.floor(now()/1000)+600})}
+const startBot=go(async()=>{await userOK();const sc=[...document.querySelectorAll('.sc:checked')].map(x=>x.value),key='bk_'+hex(rnd(6)),secret=hex(rnd(32));
+ DB.bot={key,sid:hex(rnd(6)),scopes:sc,secretHash:await sha(secret),sealed:await seal(secret)};DB.killed=false;B={key,secret};
+ await botAuth();log(`Bot uruchomiony: API_KEY ${key}, zakresy: ${sc.join(', ')||'brak'} (wypłaty niemożliwe)`,'ok')});
+const renew=go(async()=>{await botAuth();log('Bot odnowił token podpisanym żądaniem HMAC','ok')});
+const revokeBot=go(async()=>{await userOK();DB.revoked.add(DB.bot.sid);log('Użytkownik cofnął botowi dostęp','wn');if(CH)drop('cofnięto dostęp, kanał zerwany natychmiast')});
+const kill=go(async()=>{if(DB.bot)DB.revoked.add(DB.bot.sid);DB.killed=true;if(CH)drop('KILL SWITCH');const n=EX.open.length;EX.open=[];
+ log(`🚨 KILL SWITCH: unieważniono tokeny i klucze bota, zerwano połączenia, anulowano ${n} zleceń na giełdzie`,'er')});
+async function pack(x,dt=0){const b={key:B.key,ts:now()-dt,nonce:hex(rnd(8)),...x};return{b,sig:hex(await hmac(E.encode(B.secret),canon(b)))}}
+const order=go(async mode=>{const o={side:$('sd').value,qty:+$('qt').value,price:+$('pr').value},p=await pack(o,mode=='old'?30000:0);lastPkt=p;
+ log(`Bot → ${o.side} ${o.qty} BTC @ ${o.price}, podpis HMAC, nonce ${p.b.nonce.slice(0,6)}…`);await srvOrder(p,B.token)});
+const replay=go(async()=>{if(!lastPkt)throw'Najpierw złóż zlecenie';log('Atakujący wysyła ponownie przechwycony pakiet','wn');await srvOrder(lastPkt,B.token)});
+const tamper=go(async()=>{const p=await pack({side:$('sd').value,qty:+$('qt').value,price:+$('pr').value});log('MITM zmienia cenę w pakiecie po podpisie','wn');await srvOrder({b:{...p.b,price:p.b.price*.5},sig:p.sig},B.token)});
+const withdraw=go(async()=>{log('Przejęty bot próbuje wypłacić środki','wn');await gate(B.token,'funds:withdraw')});
+const chpass=go(async()=>{log('Przejęty bot próbuje zmienić hasło konta','wn');await gate(B.token,'account:change_password')});
+const cancelAll=go(async()=>{await gate(B.token,'trade:cancel_orders');const n=EX.open.length;EX.open=[];log(`Anulowano ${n} otwartych zleceń bota`,'ok')});
+
+/* ---- serwer: bezpieczniki + giełda ---- */
+async function srvOrder(p,tok){await gate(tok,'trade:execute_orders');await verifyPacket(p.b,p.sig);const o=p.b;
+ if(EX.susp)throw'RAIL: handel zawieszony do końca doby (Max Daily Drawdown)';
+ if(o.qty*o.price>equity()*DB.lim.pos/100)throw`RAIL: pozycja ${(o.qty*o.price).toFixed(0)} USDT przekracza ${DB.lim.pos}% kapitału`;
+ if(Math.abs(o.price-EX.px)/EX.px*100>DB.lim.slip)throw`RAIL: odchylenie ceny od rynku większe niż ${DB.lim.slip}% (tolerancja poślizgu)`;
+ const k=await unseal(DB.exKey);log(`🔑 klucz giełdowy (${k.length} zn.) odszyfrowany w RAM tylko na czas podpisu, potem usunięty`);
+ if(o.side=='buy'&&o.qty*o.price>EX.usdt)throw'Giełda: brak środków';if(o.side=='sell'&&o.qty>EX.btc)throw'Giełda: brak BTC';
+ fills(o)?fill(o):(EX.open.push(o),log('Zlecenie przyjęte, czeka w księdze (limit)','wn'))}
+const fills=o=>o.side=='buy'?o.price>=EX.px:o.price<=EX.px;
+function fill(o){if(o.side=='buy'){if(o.qty*EX.px>EX.usdt)return;EX.usdt-=o.qty*EX.px;EX.btc+=o.qty}else{if(o.qty>EX.btc)return;EX.usdt+=o.qty*EX.px;EX.btc-=o.qty}
+ log(`✔ wykonano ${o.side} ${o.qty} BTC @ ${EX.px.toFixed(0)}`,'ok')}
+function match(){EX.open=EX.open.filter(o=>{const f=fills(o);if(f)fill(o);return !f})}
+function dd(){if(!EX.susp&&equity()<EX.start*(1-DB.lim.dd/100)){EX.susp=true;EX.open=[];log(`🛑 Max Daily Drawdown (${DB.lim.dd}%) przekroczony: uprawnienia handlowe bota zawieszone do końca doby`,'er')}}
+const setLim=()=>{DB.lim={pos:+$('lp').value,dd:+$('ld').value,slip:+$('ls').value}};
+const crash=go(async()=>{EX.px*=.8;log('Krach rynku −20%','wn');match();dd()});
+const skip=go(async()=>{off+=11*60000;log('Zegar przesunięty o +11 min (tokeny 10-minutowe wygasły)','wn')});
+setInterval(()=>{EX.px*=1+(Math.random()-.5)*.002;match();dd();ui()},1500);
+
+/* ---- kanał real-time ---- */
+const getTicket=go(async()=>{const c=await gate(B.token,'read:market_data'),t=hex(rnd(12));DB.tickets[t]={exp:now()+8000,used:false,sid:c.sid};B.ticket=t;log('Wydano jednorazowy bilet sesyjny (ważny 8 s)','ok')});
+const connect=go(async()=>{const k=DB.tickets[B.ticket];if(!k)throw'Handshake: brak biletu';if(k.used)throw'Handshake: bilet już użyty, połączenie odrzucone';if(k.exp<now())throw'Handshake: bilet wygasł';
+ k.used=true;CH={beats:0,iv:setInterval(beat,5000)};log('Handshake OK: kanał WebSocket otwarty (token nie trafił do URL ani logów)','ok')});
+async function beat(){if(!CH)return;CH.beats++;try{try{await vjwt(B.token)}catch(e){if(String(e).includes('wygasł')){await botAuth();log('Ciche odświeżenie poświadczeń w tle','ok')}else throw e}}
+ catch(e){return drop('reautoryzacja nieudana: '+(e&&e.message||e))}log('♥ heartbeat #'+CH.beats);ui()}
+function drop(r){if(CH){clearInterval(CH.iv);CH=null}log('Kanał zerwany: '+r,'er');ui()}
+
+/* ---- dane demo, widok ---- */
+function ui(){$('us').textContent=U.at?`zalogowany\naccess:  ${U.at.slice(0,34)}…\nrefresh: ${U.rt.slice(0,12)}… (HttpOnly)`:'niezalogowany';
+ $('bs').textContent=DB.bot?(DB.killed?'unieważniony (kill switch)':(DB.revoked.has(DB.bot.sid)?'dostęp cofnięty':`aktywny ${DB.bot.key}\nzakresy: ${DB.bot.scopes.join(', ')||'brak'}\nskrót sekretu: ${DB.bot.secretHash.slice(0,20)}…`)):'brak bota';
+ $('ex').textContent=`Kurs BTC: ${EX.px.toFixed(0)} USDT\nUSDT: ${EX.usdt.toFixed(2)} | BTC: ${EX.btc.toFixed(4)}\nKapitał: ${equity().toFixed(2)} (${((equity()/EX.start-1)*100).toFixed(2)}%)\nOtwarte zlecenia: ${EX.open.length}\nHandel: ${EX.susp?'ZAWIESZONY (drawdown)':'aktywny'}`;
+ $('ch').textContent=(CH?`połączony, heartbeat #${CH.beats}`:'rozłączony')+(B.ticket?`\nostatni bilet: ${B.ticket.slice(0,10)}…`:'')}
+const dump=go(async()=>{$('dump').textContent=JSON.stringify({hasloHash:DB.user.pw.slice(0,24)+'…',sekretBotaSkrót:DB.bot&&DB.bot.secretHash.slice(0,24)+'…',kluczGieldowy:DB.exKey,sekretBotaSealed:DB.bot&&DB.bot.sealed},null,1);
+ log('Atakujący skopiował całą bazę: są tylko szyfrogramy i zawinięte klucze DEK','wn');
+ try{const f=await S.generateKey({name:'AES-GCM',length:256},false,['decrypt']);await S.decrypt({name:'AES-GCM',iv:unhex(DB.exKey.iv2)},f,unhex(DB.exKey.wk))}
+ catch{throw'Odszyfrowanie niemożliwe bez klucza głównego z KMS/HSM: klucze giełdowe bezpieczne'}});
+(async()=>{KEYS=await S.generateKey({name:'RSASSA-PKCS1-v1_5',modulusLength:2048,publicExponent:new Uint8Array([1,0,1]),hash:'SHA-256'},false,['sign','verify']);
+ KMS=await S.generateKey({name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+ const salt=rnd(16);DB.user={salt:hex(salt),pw:await pbk('Test#2026pass',salt),totp:rnd(20)};
+ DB.exKey=await seal('EXCHANGE_KEY=ab12cd34ef56;SECRET=9f8e7d6c5b4a (tylko handel, bez wypłat)');
+ log('System gotowy: para kluczy RS256, klucz główny KMS, konto użytkownika, zaszyfrowany klucz giełdowy','ok');ui();
+ setInterval(async()=>{$('ph').textContent=(await totp(DB.user.totp)).replace(/(...)(...)/,'$1 $2')+'   ('+(30-Math.floor(now()/1000)%30)+' s)'},500)})();
+</script></body></html>
